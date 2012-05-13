@@ -20,9 +20,17 @@ namespace ConsoleHost
         }
 
 
+
+
         public IList<HttpProxy.IUriHandlerConfiguration> UriHandlers
         {
             get { throw new NotImplementedException(); }
+        }
+
+
+        public string ListeningProtocol
+        {
+            get { return "http"; }
         }
     }
 }

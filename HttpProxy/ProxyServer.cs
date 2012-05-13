@@ -16,8 +16,8 @@ namespace HttpProxy
 
         private IConfiguration _config;
 
-        private static List<string> _excludedRequestHeaders = new List<string>() { "Connection", "Accept", "Host", "User-Agent", "Referer" };
-        private static List<string> _excludedResponseHeaders = new List<string>() { "Content-Length", "Server" };
+        private static List<string> _excludedRequestHeaders = new List<string>() { "Connection", "Accept", "Host", "User-Agent", "Referer", "Accept-Encoding" };
+        private static List<string> _excludedResponseHeaders = new List<string>() { "Content-Length", "Server", "Host", "Date" };
 
         public ProxyServer(ILogger log)
         {
@@ -53,12 +53,12 @@ namespace HttpProxy
             try
             {
                 _log.Verbose("Handling request for {0} from {1}", req.Url, req.RemoteEndPoint.Address);
-                TransformAndRun(req, res, (toTransform) => new Uri("http://192.168.2.100/" + toTransform.PathAndQuery),
+                TransformAndRun(req, res, (toTransform) => new Uri("http://localhost:4964/" + toTransform.PathAndQuery),
                                       (requestResponse, serverResponse) =>
                                       {
                                           try
                                           {
-                                              serverResponse.ContentLength64 = requestResponse.ContentLength;
+                                              serverResponse.ContentLength64 = requestResponse.ContentLength;                                              
 
                                               foreach (string item in requestResponse.Headers)
                                               {
@@ -73,17 +73,69 @@ namespace HttpProxy
                                                   }
 
                                               }
-                                              
 
-                                              var copier = new AsyncStreamCopier(requestResponse.GetResponseStream(), serverResponse.OutputStream);
+                                              serverResponse.RedirectLocation = "http://localhost:80";
 
-                                              copier.Completed += (sender, e) =>
+                                              if(requestResponse.ContentType.StartsWith("text/html", StringComparison.InvariantCultureIgnoreCase))
+                                              {
+                                                  var rewriter = new AsyncUrlRewriter(requestResponse.GetResponseStream(), serverResponse.OutputStream, 
+                                                        Encoding.UTF8, "localhost:12214", "localhost");
+
+                                                  int bytesToWrite = 0;
+                                                  rewriter.BytesWriting += (sender, e) =>
                                                   {
-                                                      serverResponse.Close();
-                                                      requestResponse.Close();
+                                                      bytesToWrite += e.Data;                                                     
                                                   };
 
-                                              copier.Copy();
+                                                  rewriter.WriteError += (sender, e) =>
+                                                      {
+                                                          e.Data.Cancel = true;
+                                                          _log.Error(e.Data.Exception);
+                                                      };
+
+                                                  rewriter.Canceled += (sender, e) =>
+                                                      {
+                                                          try
+                                                          {
+                                                            serverResponse.Close();
+                                                            requestResponse.Close();
+                                                          }
+                                                          catch (Exception ex)
+                                                          {
+                                                              _log.Error(ex);
+                                                          }
+                                                      };
+
+                                                  rewriter.Completed += (sender, e) =>
+                                                      {
+                                                          if (bytesToWrite < serverResponse.ContentLength64)
+                                                          {
+                                                              int bytesToFill = (int)(serverResponse.ContentLength64 - bytesToWrite);
+                                                              var bytez = new byte[bytesToFill];
+
+                                                              serverResponse.OutputStream.Write(bytez, 0, bytesToFill);
+                                                          }
+
+                                                          serverResponse.Close();
+                                                          requestResponse.Close();
+                                                      };
+
+
+
+                                                  rewriter.Copy();
+                                              }
+                                              else
+                                              {
+                                                  var copier = new AsyncStreamCopier(requestResponse.GetResponseStream(), serverResponse.OutputStream);
+
+                                                  copier.Completed += (sender, e) =>
+                                                      {
+                                                          serverResponse.Close();
+                                                          requestResponse.Close();
+                                                      };
+
+                                                  copier.Copy();
+                                              }
                                           }
                                           catch (Exception ex)
                                           {
@@ -139,6 +191,23 @@ namespace HttpProxy
             proxyRequest.Method = clientRequest.HttpMethod;
             proxyRequest.ContentLength = clientRequest.ContentLength64;
             proxyRequest.ContentType = clientRequest.ContentType;
+
+            proxyRequest.Headers.Add("X-Forwarded-For", clientRequest.UserHostAddress);
+
+            proxyRequest.Host = "localhost";
+
+            // http://www.w3.org/Protocols/rfc2616/rfc2616-sec14.html#sec14.45
+            string currentServerName = _config.ListeningRoot;
+            string currentServerPort = _config.ListeningPort.ToString();
+            string currentServerProtocol = _config.ListeningProtocol;
+
+            if (currentServerProtocol.IndexOf("/") >= 0)
+                currentServerProtocol = currentServerProtocol.Substring(currentServerProtocol.IndexOf("/") + 1);
+
+            string currentVia = String.Format("{0} {1}:{2} ({3})", "1.1", currentServerName, currentServerPort, "SharpProxy");
+
+            proxyRequest.Headers.Add("Via", currentVia);
+
 
             AsyncCallback callback = (requestResult) => 
                     {

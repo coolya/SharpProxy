@@ -41,7 +41,9 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="AsyncStreamCopier.cs" />
+    <Compile Include="AsyncUrlRewriter.cs" />
     <Compile Include="DataEventArgs.cs" />
+    <Compile Include="ExceptionEventContainer.cs" />
     <Compile Include="IConfiguration.cs" />
     <Compile Include="ILogger.cs" />
     <Compile Include="IReadOnlyUriHandler.cs" />
