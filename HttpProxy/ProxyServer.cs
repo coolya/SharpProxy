@@ -5,6 +5,7 @@ using System.Text;
 using SimpleHttpServer;
 using System.Net;
 using System.Reflection;
+using System.IO;
 
 namespace HttpProxy
 {
@@ -53,12 +54,13 @@ namespace HttpProxy
             try
             {
                 _log.Verbose("Handling request for {0} from {1}", req.Url, req.RemoteEndPoint.Address);
-                TransformAndRun(req, res, (toTransform) => new Uri("http://localhost:4964/" + toTransform.PathAndQuery),
+                TransformAndRun(req, res, (toTransform) => new Uri("http://microdoof.net/" + toTransform.PathAndQuery),
                                       (requestResponse, serverResponse) =>
                                       {
                                           try
                                           {
-                                              serverResponse.ContentLength64 = requestResponse.ContentLength;                                              
+                                              if (requestResponse.ContentLength > -1)
+                                                  serverResponse.ContentLength64 = requestResponse.ContentLength;
 
                                               foreach (string item in requestResponse.Headers)
                                               {
@@ -67,61 +69,50 @@ namespace HttpProxy
                                                       if (!_excludedResponseHeaders.Contains(item))
                                                           serverResponse.Headers.Add(item, requestResponse.Headers[item]);
                                                   }
-                                                  catch (Exception)
+                                                  catch (Exception ex)
                                                   {
-                                                      _log.Warning("Failed to copy Header {0} with Value {1}", item, requestResponse.Headers[item]);
+                                                      _log.Warning("Failed to copy Header {0} with Value {1} \r\n {2}", item, requestResponse.Headers[item], ex.Message);
                                                   }
-
                                               }
 
-                                              serverResponse.RedirectLocation = "http://localhost:80";
-
-                                              if(requestResponse.ContentType.StartsWith("text/html", StringComparison.InvariantCultureIgnoreCase))
+                                              if(requestResponse.ContentType.StartsWith("text/html", StringComparison.InvariantCultureIgnoreCase)
+                                                  || requestResponse.ContentType.StartsWith("text/javascript", StringComparison.InvariantCultureIgnoreCase)
+                                                  || requestResponse.ContentType.StartsWith("text/css", StringComparison.InvariantCultureIgnoreCase))
                                               {
-                                                  var rewriter = new AsyncUrlRewriter(requestResponse.GetResponseStream(), serverResponse.OutputStream, 
-                                                        Encoding.UTF8, "localhost:12214", "localhost");
+                                                  var buffer = new MemoryStream();
+                                                  var rewriter = new AsyncUrlRewriter(requestResponse.GetResponseStream(), buffer,
+                                                        Encoding.UTF8, "microdoof.net", "localhost:8080");
 
-                                                  int bytesToWrite = 0;
-                                                  rewriter.BytesWriting += (sender, e) =>
-                                                  {
-                                                      bytesToWrite += e.Data;                                                     
-                                                  };
-
-                                                  rewriter.WriteError += (sender, e) =>
+                                                   rewriter.OnException += (sender, e) =>
                                                       {
                                                           e.Data.Cancel = true;
                                                           _log.Error(e.Data.Exception);
-                                                      };
 
-                                                  rewriter.Canceled += (sender, e) =>
-                                                      {
                                                           try
                                                           {
-                                                            serverResponse.Close();
-                                                            requestResponse.Close();
+                                                              serverResponse.Close();
+                                                              requestResponse.Close();
                                                           }
                                                           catch (Exception ex)
                                                           {
                                                               _log.Error(ex);
                                                           }
-                                                      };
+                                                      };                                               
 
                                                   rewriter.Completed += (sender, e) =>
                                                       {
-                                                          if (bytesToWrite < serverResponse.ContentLength64)
-                                                          {
-                                                              int bytesToFill = (int)(serverResponse.ContentLength64 - bytesToWrite);
-                                                              var bytez = new byte[bytesToFill];
+                                                          serverResponse.ContentLength64 = buffer.Length;
+                                                          buffer.Position = 0;
 
-                                                              serverResponse.OutputStream.Write(bytez, 0, bytesToFill);
-                                                          }
-
-                                                          serverResponse.Close();
-                                                          requestResponse.Close();
+                                                          var copier = new AsyncStreamCopier(buffer, serverResponse.OutputStream);
+                                                          copier.Completed += (s, a) =>
+                                                              {
+                                                                  buffer.Close();
+                                                                  serverResponse.Close();
+                                                                  requestResponse.Close();
+                                                              };
+                                                          copier.Copy();
                                                       };
-
-
-
                                                   rewriter.Copy();
                                               }
                                               else
@@ -156,6 +147,7 @@ namespace HttpProxy
         {
             var proxyRequest = (HttpWebRequest)HttpWebRequest.Create(transformUri(clientRequest.Url));
 
+            proxyRequest.SendChunked = false;
             proxyRequest.Accept = clientRequest.Headers["Accept"];
             proxyRequest.UserAgent = clientRequest.Headers["User-Agent"];
             proxyRequest.Referer = clientRequest.Headers["Referer"];
@@ -166,11 +158,12 @@ namespace HttpProxy
             {
                 try
                 {
+                    cookie.Domain = proxyRequest.RequestUri.Host;
                     proxyRequest.CookieContainer.Add(cookie);
                 }
-                catch (Exception)
+                catch (Exception ex)
                 {
-                    _log.Warning("Falied to proxy cookie {0}", cookie);
+                    _log.Warning("Falied to proxy cookie {0} \r\n {1}", cookie, ex.Message);
                 }
             }
 
@@ -193,8 +186,6 @@ namespace HttpProxy
             proxyRequest.ContentType = clientRequest.ContentType;
 
             proxyRequest.Headers.Add("X-Forwarded-For", clientRequest.UserHostAddress);
-
-            proxyRequest.Host = "localhost";
 
             // http://www.w3.org/Protocols/rfc2616/rfc2616-sec14.html#sec14.45
             string currentServerName = _config.ListeningRoot;
