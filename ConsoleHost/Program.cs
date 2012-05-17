@@ -11,7 +11,7 @@ namespace ConsoleHost
         {
             var Proxy = new HttpProxy.ProxyServer(new ConsoleLogger());
 
-            var config = new Configuration() { ListeningPort = 80, ListeningRoot = "localhost" };
+            var config = new Configuration() { ListeningPort = 8080, ListeningRoot = "localhost" };
 
             Proxy.Start(config);
 
