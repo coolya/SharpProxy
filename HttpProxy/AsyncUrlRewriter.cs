@@ -8,7 +8,7 @@ namespace HttpProxy
 {
     class AsyncUrlRewriter 
     {
-        private byte[] _lastBuffer;
+        private string _lastBuffer;
         private Encoding _encoding;
         private string orgUrl;
         private string newUrl;
@@ -19,11 +19,7 @@ namespace HttpProxy
         private byte[] buffer = new byte[4096];
 
         public event EventHandler Completed;
-        public event EventHandler<DataEventArgs<int>> BytesWriting;
-        public event EventHandler<DataEventArgs<ExceptionEventContainer>> WriteError;
-        public event EventHandler Canceled;
-
-        private static object _lock = new object();
+        public event EventHandler<DataEventArgs<ExceptionEventContainer>> OnException;
 
         public AsyncUrlRewriter(Stream input, Stream output, Encoding enc, string url, string newUrl)
         {
@@ -34,7 +30,6 @@ namespace HttpProxy
             this.orgUrl = url;
             this.newUrl = newUrl;
         }
-
 
         public void Copy()
         {
@@ -48,7 +43,6 @@ namespace HttpProxy
 
         private void ReadComplete(IAsyncResult result)
         {
-
             int bytes = _input.EndRead(result);
 
             if (bytes == 0)
@@ -57,59 +51,18 @@ namespace HttpProxy
                 return;
             }
 
-
-            int index = 0;
-            int lastindex = 0;
             string str = _encoding.GetString(buffer, 0, bytes);
 
-            StringBuilder rewritten = new StringBuilder();
-
-            while ((index = str.IndexOf("href", index, StringComparison.OrdinalIgnoreCase)) != -1)
+            if (!string.IsNullOrEmpty(_lastBuffer))
             {
-                int firstQuote = str.IndexOf('"', index);
-                int secondQuote = str.IndexOf('"', firstQuote + 1);
-
-                rewritten.Append(str.Substring(lastindex, firstQuote + 1 - lastindex));
-
-                string target = str.Substring(firstQuote + 1, secondQuote - firstQuote - 1);
-
-                rewritten.Append(target.Replace(orgUrl, newUrl));
-
-                lastindex = secondQuote;
-
-                index = secondQuote;
+                str = _lastBuffer + str;
+                _lastBuffer = null;
             }
 
-            rewritten.Append(str.Substring(lastindex));
+            str = RewriteUrl("href", str);
+            str = RewriteUrl("src", str);
 
-            str = rewritten.ToString();
-
-            rewritten = new StringBuilder();
-
-            index = 0;
-            lastindex = 0;
-
-            while ((index = str.IndexOf("src", index, StringComparison.OrdinalIgnoreCase)) != -1)
-            {
-                int firstQuote = str.IndexOf('"', index);
-                int secondQuote = str.IndexOf('"', firstQuote + 1);
-
-                rewritten.Append(str.Substring(lastindex, firstQuote + 1 - lastindex));
-
-                string target = str.Substring(firstQuote + 1, secondQuote - firstQuote - 1);
-
-                rewritten.Append(target.Replace(orgUrl, newUrl));
-
-                lastindex = secondQuote;
-
-                index = secondQuote;
-            }
-
-            rewritten.Append(str.Substring(lastindex));
-
-            var byteData = _encoding.GetBytes(rewritten.ToString());
-
-            RaiseBytesWriting(byteData.Length);
+            var byteData = _encoding.GetBytes(str);
 
             bool cancel = false;
 
@@ -120,13 +73,61 @@ namespace HttpProxy
             catch (Exception ex)
             {
                 //let someone else deside if its clever to continue
-                cancel = RaiseWriteError(ex);
+                cancel = RaiseException(ex);
             }
 
             if (!cancel)
                 GetData();
-            else
-                RaiseCanceled();
+        }
+
+        private string RewriteUrl(string toRewrite, string str)
+        {
+            int index = 0;
+            int lastindex = 0;
+
+            StringBuilder rewritten = new StringBuilder();
+
+            index = str.IndexOf(toRewrite, index, StringComparison.OrdinalIgnoreCase);
+
+            while (index != -1)
+            {
+                int firstQuote = index + toRewrite.Length + 1;
+                char quote = '0';
+
+                if (firstQuote < str.Length)
+                    quote = str[firstQuote];
+                else
+                    firstQuote = -1;
+
+                if (firstQuote == -1)
+                {// we have found something to replace but it is longer than the buffer
+                    _lastBuffer = str.Substring(index - toRewrite.Length);
+                    index = -1;
+                }
+                else
+                {
+                    int secondQuote = str.IndexOf(quote, firstQuote + 1);
+
+                    rewritten.Append(str.Substring(lastindex, firstQuote + 1 - lastindex));
+
+                    string target;
+
+                    if (secondQuote != -1)
+                    {
+                        target = str.Substring(firstQuote + 1, secondQuote - firstQuote - 1);
+                        rewritten.Append(target.Replace(orgUrl, newUrl));
+                        lastindex = secondQuote;
+                        index = str.IndexOf(toRewrite, secondQuote, StringComparison.OrdinalIgnoreCase);
+                    }
+                    else
+                    {//we have found something but it is longer than the buffer
+                        _lastBuffer = str.Substring(index);
+                        index = -1;
+                    }
+                }
+            }
+            rewritten.Append(str.Substring(lastindex));
+            return rewritten.ToString();
         }
 
         private void RaiseComplete()
@@ -135,19 +136,11 @@ namespace HttpProxy
 
             if (handler != null)
                 handler(this, EventArgs.Empty);
-        }
+        }        
 
-        private void RaiseBytesWriting(int bytes)
+        private bool RaiseException(Exception ex)
         {
-            var handler = BytesWriting;
-
-            if (handler != null)
-                handler(this, new DataEventArgs<int>(bytes));
-        }
-
-        private bool RaiseWriteError(Exception ex)
-        {
-            var handler = WriteError;
+            var handler = OnException;
 
             if (handler != null)
             {
@@ -158,15 +151,5 @@ namespace HttpProxy
 
             return true;
         }
-
-        private void RaiseCanceled()
-        {
-            var handler = Canceled;
-
-            if (handler != null)
-                handler(this, EventArgs.Empty);
-        }
-
-
     }
 }
