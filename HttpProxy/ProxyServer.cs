@@ -11,42 +11,29 @@ namespace HttpProxy
 {
     public class ProxyServer
     {
-        private ILogger _log;
+        ILogger _log;
+        Server _server;
+        IConfiguration _config;
 
-        private Server _server;
-
-        private IConfiguration _config;
-
-        private static List<string> _excludedRequestHeaders = new List<string>() { "Connection", "Accept", "Host", "User-Agent", "Referer", "Accept-Encoding" };
-        private static List<string> _excludedResponseHeaders = new List<string>() { "Content-Length", "Server", "Host", "Date" };
+        static List<string> _excludedRequestHeaders = new List<string>() { "Connection", "Accept", "Host", "User-Agent", "Referer", "Accept-Encoding" };
+        static List<string> _excludedResponseHeaders = new List<string>() { "Content-Length", "Server", "Host", "Date" };
 
         public ProxyServer(ILogger log)
         {
             _log = log;
-            AppDomain.CurrentDomain.TypeResolve += (sender, e) =>
-            {
-                var config = _config.UriHandlers.FirstOrDefault((item) => item.Type == e.Name);
-
-                if (config != null)
-                    return Assembly.Load(config.Assembly);
-
-                return null;
-            };
         }
 
-
-        public void Start(IConfiguration config)
+        public void Start(IConfiguration config, Server server)
         {
             _config = config;
             Action<HttpListenerRequest, ServerResponse> act = HandleRequest;
 
-            _server = new Server(config.ListeningRoot, config.ListeningPort);
-            _server.Get("", act);
-            _server.Delete("", act);
-            _server.Post("", act);
-            _server.Put("", act);
-            _server.Start();
-            _log.Info("Server up and running on {0} port {1}", config.ListeningRoot, config.ListeningPort);
+            _server = server;
+            _server.Get(config.OwnUrl, act);
+            _server.Delete(config.OwnUrl, act);
+            _server.Post(config.OwnUrl, act);
+            _server.Put(config.OwnUrl, act);
+            _log.Info("Server configured on {0} for upstream {1}", config.OwnUrl, config.UpstreamUrl);
         }
 
         public void HandleRequest(System.Net.HttpListenerRequest req, ServerResponse res)
@@ -54,7 +41,7 @@ namespace HttpProxy
             try
             {
                 _log.Verbose("Handling request for {0} from {1}", req.Url, req.RemoteEndPoint.Address);
-                TransformAndRun(req, res, (toTransform) => new Uri("http://microdoof.net/" + toTransform.PathAndQuery),
+                TransformAndRun(req, res, (toTransform) => new Uri(_config.UpstreamUrl + toTransform.PathAndQuery),
                                       (requestResponse, serverResponse) =>
                                       {
                                           try
@@ -81,7 +68,7 @@ namespace HttpProxy
                                               {
                                                   var buffer = new MemoryStream();
                                                   var rewriter = new AsyncUrlRewriter(requestResponse.GetResponseStream(), buffer,
-                                                        Encoding.UTF8, "microdoof.net", "localhost:8080");
+                                                        Encoding.UTF8, _config.UpstreamUrl, _config.OwnUrl);
 
                                                    rewriter.OnException += (sender, e) =>
                                                       {
@@ -178,7 +165,6 @@ namespace HttpProxy
                 {
                     _log.Warning("Failed to copy Header {0} with Value {1}", item, clientRequest.Headers[item]);
                 }
-
             }
 
             proxyRequest.Method = clientRequest.HttpMethod;
@@ -186,19 +172,6 @@ namespace HttpProxy
             proxyRequest.ContentType = clientRequest.ContentType;
 
             proxyRequest.Headers.Add("X-Forwarded-For", clientRequest.UserHostAddress);
-
-            // http://www.w3.org/Protocols/rfc2616/rfc2616-sec14.html#sec14.45
-            string currentServerName = _config.ListeningRoot;
-            string currentServerPort = _config.ListeningPort.ToString();
-            string currentServerProtocol = _config.ListeningProtocol;
-
-            if (currentServerProtocol.IndexOf("/") >= 0)
-                currentServerProtocol = currentServerProtocol.Substring(currentServerProtocol.IndexOf("/") + 1);
-
-            string currentVia = String.Format("{0} {1}:{2} ({3})", "1.1", currentServerName, currentServerPort, "SharpProxy");
-
-            proxyRequest.Headers.Add("Via", currentVia);
-
 
             AsyncCallback callback = (requestResult) => 
                     {

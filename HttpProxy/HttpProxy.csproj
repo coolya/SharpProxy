@@ -40,7 +40,6 @@
     <Reference Include="System.Xml" />
   </ItemGroup>
   <ItemGroup>
-    <Compile Include="AsyncStreamCopier.cs" />
     <Compile Include="AsyncUrlRewriter.cs" />
     <Compile Include="DataEventArgs.cs" />
     <Compile Include="ExceptionEventContainer.cs" />
