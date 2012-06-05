@@ -7,30 +7,16 @@ namespace ConsoleHost
 {
     class Configuration : HttpProxy.IConfiguration
     {
-        public string ListeningRoot
+        public string OwnUrl
         {
             get;
             set;
         }
 
-        public int ListeningPort
+        public string UpstreamUrl
         {
             get;
             set;
-        }
-
-
-
-
-        public IList<HttpProxy.IUriHandlerConfiguration> UriHandlers
-        {
-            get { throw new NotImplementedException(); }
-        }
-
-
-        public string ListeningProtocol
-        {
-            get { return "http"; }
         }
     }
 }

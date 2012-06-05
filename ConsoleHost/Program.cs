@@ -9,13 +9,18 @@ namespace ConsoleHost
     {
         static void Main(string[] args)
         {
-            var Proxy = new HttpProxy.ProxyServer(new ConsoleLogger());
+            var server = new SimpleHttpServer.Server("*", 8080);
 
-            var config = new Configuration() { ListeningPort = 8080, ListeningRoot = "localhost" };
+            var config = new Configuration() { OwnUrl=@"http://localhost:8080", UpstreamUrl=@"http://microdoof.net"};
+            var Proxy = new HttpProxy.ProxyServer(config, new ConsoleLogger());
 
-            Proxy.Start(config);
+            Proxy.Attach(server);
+
+            server.Start();
 
             Console.ReadLine();
+
+            server.Stop();
         }
     }
 }

@@ -18,22 +18,22 @@ namespace HttpProxy
         static List<string> _excludedRequestHeaders = new List<string>() { "Connection", "Accept", "Host", "User-Agent", "Referer", "Accept-Encoding" };
         static List<string> _excludedResponseHeaders = new List<string>() { "Content-Length", "Server", "Host", "Date" };
 
-        public ProxyServer(ILogger log)
+        public ProxyServer(IConfiguration config, ILogger log)
         {
             _log = log;
+            _config = config;
         }
 
-        public void Start(IConfiguration config, Server server)
-        {
-            _config = config;
+        public void Attach( Server server)
+        {            
             Action<HttpListenerRequest, ServerResponse> act = HandleRequest;
 
             _server = server;
-            _server.Get(config.OwnUrl, act);
-            _server.Delete(config.OwnUrl, act);
-            _server.Post(config.OwnUrl, act);
-            _server.Put(config.OwnUrl, act);
-            _log.Info("Server configured on {0} for upstream {1}", config.OwnUrl, config.UpstreamUrl);
+            _server.Get(_config.OwnUrl, act);
+            _server.Delete(_config.OwnUrl, act);
+            _server.Post(_config.OwnUrl, act);
+            _server.Put(_config.OwnUrl, act);
+            _log.Info("Server configured on {0} for upstream {1}", _config.OwnUrl, _config.UpstreamUrl);
         }
 
         public void HandleRequest(System.Net.HttpListenerRequest req, ServerResponse res)
