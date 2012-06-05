@@ -8,15 +8,15 @@ namespace HttpProxy
 {
     class AsyncUrlRewriter 
     {
-        private string _lastBuffer;
-        private Encoding _encoding;
-        private string orgUrl;
-        private string newUrl;
+        string _lastBuffer;
+        Encoding _encoding;
+        string orgUrl;
+        string newUrl;
 
-        private readonly Stream _input;
-        private readonly Stream _output;
+        readonly Stream _input;
+        readonly Stream _output;
 
-        private byte[] buffer = new byte[4096];
+        byte[] buffer = new byte[4096];
 
         public event EventHandler Completed;
         public event EventHandler<DataEventArgs<ExceptionEventContainer>> OnException;
@@ -36,12 +36,12 @@ namespace HttpProxy
             GetData();
         }
 
-        private void GetData()
+        void GetData()
         {
             _input.BeginRead(buffer, 0, buffer.Length, ReadComplete, null);
         }
 
-        private void ReadComplete(IAsyncResult result)
+        void ReadComplete(IAsyncResult result)
         {
             int bytes = _input.EndRead(result);
 
@@ -80,7 +80,7 @@ namespace HttpProxy
                 GetData();
         }
 
-        private string RewriteUrl(string toRewrite, string str)
+        string RewriteUrl(string toRewrite, string str)
         {
             int index = 0;
             int lastindex = 0;
@@ -130,7 +130,7 @@ namespace HttpProxy
             return rewritten.ToString();
         }
 
-        private void RaiseComplete()
+        void RaiseComplete()
         {
             var handler = Completed;
 
@@ -138,7 +138,7 @@ namespace HttpProxy
                 handler(this, EventArgs.Empty);
         }        
 
-        private bool RaiseException(Exception ex)
+        bool RaiseException(Exception ex)
         {
             var handler = OnException;
 
